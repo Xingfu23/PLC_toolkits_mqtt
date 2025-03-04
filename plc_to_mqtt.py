@@ -5,6 +5,11 @@ import time
 import schedule
 import threading
 
+# Set up threaded operation
+def run_threaded(job_func):
+    job_thread = threading.Thread(target=job_func)
+    job_thread.start()
+
 # PLC info
 PLC_IP = "192.168.0.1"
 PLC_RACK = 0
@@ -12,7 +17,8 @@ PLC_SLOT = 1
 DB_NUMBER = 15
 
 # MQTT info
-MQTT_BROKER = "localhost"
+# MQTT_BROKER = "localhost"
+MQTT_BROKER = "194.12.158.118"
 MQTT_PORT = 1883
 MQTT_TOPIC = "plc/s7-1200/temperature"
 
@@ -24,7 +30,7 @@ def connect_plc():
 
 # Get the data from the PLC
 def read_temperature(plc_client, offset):
-    data = plc_client.db_read(DB_NUMBER, offset, 382)
+    data = plc_client.db_read(DB_NUMBER, offset, 50)
     return snap7.util.get_real(data, 0)
 
 # Publish the data to the MQTT broker
@@ -39,22 +45,21 @@ def publish_mqtt(sensor_id, temperature):
 
 def main():
     plc = connect_plc()
-    while True:
-        try:
-            rtd01 = read_temperature(plc, 6)
-            rtd02 = read_temperature(plc, 44)
 
-            time.sleep(10)
-            # Publish the data to the MQTT broker
-            publish_mqtt("RTD01", rtd01)
-            publish_mqtt("RTD02", rtd02)
+    rtd01 = read_temperature(plc, 6)
+    rtd02 = read_temperature(plc, 44)
 
-
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            break
+    # Publish the data to the MQTT broker
+    publish_mqtt("RTD01", rtd01)
+    publish_mqtt("RTD02", rtd02)
 
 if __name__ == "__main__":
-    main()
+    # main()
+    schedule.every().minute.at(":00").do(run_threaded, main)
+    schedule.every().minute.at(":20").do(run_threaded, main)
+    schedule.every().minute.at(":40").do(run_threaded, main)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
 
 
