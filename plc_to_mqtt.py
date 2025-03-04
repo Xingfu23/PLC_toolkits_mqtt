@@ -2,6 +2,8 @@ import snap7
 import paho.mqtt.client as mqtt
 import json
 import time
+import schedule
+import threading
 
 # PLC info
 PLC_IP = "192.168.0.1"
@@ -31,7 +33,7 @@ def publish_mqtt(sensor_id, temperature):
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
     payload = json.dumps({"sensor_id": sensor_id, "temperature": temperature})
-    client.publish(MQTT_TOPIC, payload, qos=1)
+    client.publish(MQTT_TOPIC, payload, qos=0)
     client.disconnect()
     print(f"Published data to MQTT: {payload}")
 
@@ -42,15 +44,17 @@ def main():
             rtd01 = read_temperature(plc, 6)
             rtd02 = read_temperature(plc, 44)
 
+            time.sleep(10)
             # Publish the data to the MQTT broker
             publish_mqtt("RTD01", rtd01)
             publish_mqtt("RTD02", rtd02)
 
-            time.sleep(1)
+
         except Exception as e:
             print(f"An error occurred: {e}")
             break
 
 if __name__ == "__main__":
     main()
+
 
