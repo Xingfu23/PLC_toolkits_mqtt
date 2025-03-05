@@ -73,10 +73,17 @@ if __name__ == "__main__":
 
     # Schedule the job with 20 seconds interval
     schedule.every().minute.at(":00").do(run_threaded, schedule_job)
-    schedule.every().minute.at(":20").do(run_threaded, schedule_job)
-    schedule.every().minute.at(":40").do(run_threaded, schedule_job)
+    schedule.every().minute.at(":30").do(run_threaded, schedule_job)
+    # schedule.every().minute.at(":40").do(run_threaded, schedule_job)
 
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        try:
+            schedule.run_pending()
+            time.sleep(1)
+        except KeyboardInterrupt:
+            print("Exiting...")
+            break
+        except Exception as e:  
+            print(f"Error occured: {e}")
+            break
 
