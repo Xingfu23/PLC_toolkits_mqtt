@@ -65,7 +65,7 @@ def db_worker(worker_id):
             conn.commit()   
             cursor.close()
             db_pool.putconn(conn)
-            print(f"Woker {worker_id} inserted data to the database: {data}")
+            # print(f"Woker {worker_id} inserted data to the database: {data}")
         except Exception as e:
             print(f"woker {worker_id} error: {e}")
         finally:
@@ -82,24 +82,35 @@ for i in range(num_workers):
     workers.append(t)
 
 def on_connect(client, userdata, flags, rc, properties):
-    print(f"Connected with result code {rc}")
+    # print(f"Connected with result code {rc}")
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Connected with result code {rc}")
     client.subscribe(MQTT_TOPIC, qos=1)
 
 def on_message(client, userdata, msg):
     try:
         msg_queue.put(msg.payload.decode("utf-8"))
+        print(f"Received message: {msg.payload}")
     except Exception as e:
         print(f"Error occured: {e}")
+
+def on_disconnect(client, userdata, rc):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Disconnected with result code {rc}")
+
+def on_log(client, userdata, level, buf):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - MQTT Log: {buf}")
 
 def main():
     # Set up the MQTT client
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
+    client.on_disconnect = on_disconnect
+    client.on_log = on_log
 
     # Connect to the MQTT broker
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
     client.loop_start()
+
 
     try:
         while True:
