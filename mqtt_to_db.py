@@ -71,9 +71,6 @@ def db_worker(worker_id):
         finally:
             msg_queue.task_done()
 
-# worker_thread = threading.Thread(target=db_worker, daemon=True)
-# worker_thread.start()
-
 num_workers = 8
 workers = []
 for i in range(num_workers):
@@ -93,7 +90,7 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print(f"Error occured: {e}")
 
-def on_disconnect(client, userdata, rc):
+def on_disconnect(client, userdata, flags, rc, properties):
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Disconnected with result code {rc}")
 
 def on_log(client, userdata, level, buf):
