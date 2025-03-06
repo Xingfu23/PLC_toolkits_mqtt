@@ -1,64 +1,127 @@
 import paho.mqtt.client as mqtt
 import psycopg2
+import psycopg2.pool
 import json
+import threading
+import queue
+import time
+import getpass
 
-# Postgres SQL connection
-DB_HOST = "localhost"
+# Database info
+DB_HOST = "194.12.158.118"
 DB_PORT = "5432"
 DB_USER = "postgres"
 DB_NAME = "plc_data"
-DB_PASSWORD = "password"
+DB_PASSWORD = getpass.getpass("Enter the password for the database: ")
 
-# MQTT connection
-MQTT_BROKER = "localhost"
+# MQTT connection info
+MQTT_BROKER = "194.12.158.118"
 MQTT_PORT = 1883
 MQTT_TOPIC = "plc/s7-1200/temperature"
 
-# Connect to PostgresSQL
-def connect_db():
-    try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER,
-            port=DB_PORT,
-            password=DB_PASSWORD
-        )
-        return conn
-    except Exception as e:
-        print(f"Cannot connect to database: {e}")
-        return None
+# Sensor id information
+sensor_id_list = [
+    "RTD01",
+    "RTD02",
+]
 
-# When a message is received from the MQTT broker, insert it into the database
-def on_message(client, userdata, message):
-    try:
-        # Analyse the json message
-        payload = json.loads(message.payload.decode())
-        sensor_id = payload["sensor_id"] # for example: "RTD01"
-        temperature = payload["temperature"] # for example: 25.5
+# Set up PostgresSQL connection pool
+try:
+    db_pool = psycopg2.pool.SimpleConnectionPool(
+        1, 20, # Min and max connections
+        user=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME
+    )
+    if db_pool:
+        print("PostgresSQL connection pool created")
+except Exception as e:
+    print(f"Cannot create PostgresSQL connection pool: {e}")
 
-        print(f"Received message from MQTT broker: {sensor_id} - {temperature:.2f}")
-    
-        # Insert the message into the database
-        conn = connect_db()
-        if conn:
-            cur = conn.cursor()
-            cur.execute("INSERT INTO temperature_data (sensor_id, temperature) VALUES (%s, %s)", (sensor_id, temperature))
-            conn.commit()
-            cur.close()
-            conn.close()
-            print("Inserted into database")
+# Set up a queue for the database connection
+msg_queue = queue.Queue()
+
+def db_worker(worker_id):
+    """
+    Database write worker thread, retrieves messages from the queue and writes to PostgreSQL.
+    """
+    while True:
+        msg_playload = msg_queue.get()
+        if msg_playload is None:
+            print(f"Worker {worker_id} stopping")
+            msg_queue.task_done()
+            break # Stop the thread
+        try:
+            # get a connection from the pool
+            conn = db_pool.getconn()
+            cursor = conn.cursor()
+            data = json.loads(msg_playload)
+            insert_sql = "INSERT INTO temperature_data (sensor_id, temperature) VALUES (%s, %s)"
+            # cursor.execute(insert_sql, (data["sensor_id"], data["temperature"]))
+            for sensor_id in sensor_id_list:
+                cursor.execute(insert_sql, (sensor_id, data[sensor_id]))
+            conn.commit()   
+            cursor.close()
+            db_pool.putconn(conn)
+            # print(f"Woker {worker_id} inserted data to the database: {data}")
+        except Exception as e:
+            print(f"woker {worker_id} error: {e}")
+        finally:
+            msg_queue.task_done()
+
+num_workers = 8
+workers = []
+for i in range(num_workers):
+    t = threading.Thread(target=db_worker, args=(i+1,), daemon=True)
+    t.start()
+    workers.append(t)
+
+def on_connect(client, userdata, flags, rc, properties):
+    # print(f"Connected with result code {rc}")
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Connected with result code {rc}")
+    client.subscribe(MQTT_TOPIC, qos=1)
+
+def on_message(client, userdata, msg):
+    try:
+        msg_queue.put(msg.payload.decode("utf-8"))
+        print(f"Received message: {msg.payload}")
     except Exception as e:
-        print(f"Error ouccured: {e}")
+        print(f"Error occured: {e}")
+
+def on_disconnect(client, userdata, flags, rc, properties):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Disconnected with result code {rc}")
+
+def on_log(client, userdata, level, buf):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - MQTT Log: {buf}")
 
 def main():
-    # Subscribe to the MQTT topic
+    # Set up the MQTT client
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.on_connect = on_connect
     client.on_message = on_message
+    client.on_disconnect = on_disconnect
+    client.on_log = on_log
+
+    # Connect to the MQTT broker
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.subscribe(MQTT_TOPIC, qos=1)
-    print(f"Subscribed to MQTT topic: {MQTT_TOPIC}")
-    client.loop_forever()
+    client.loop_start()
+
+
+    try:
+        while True:
+            time.sleep(10)
+            print(f"Queue size: {msg_queue.qsize()}")
+    except KeyboardInterrupt:
+        print("Exiting")
+    finally:
+        client.loop_stop()
+        for _ in range(num_workers):
+            msg_queue.put(None)
+        for worker in workers:
+            worker.join() # Wait for the worker threads to finish
+        # msg_queue.put(None) # Stop the worker thread
 
 if __name__ == "__main__":
     main()
