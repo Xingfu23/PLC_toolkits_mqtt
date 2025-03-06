@@ -6,4 +6,4 @@ For now, the data flow structure is:
 2. The PostgreSQL database subscribes to an MQTT server and records the data in the database. Please check the script "mqtt_to_db.py."
 To execute the programme, please **simultaneously** execute the scripts: "plc_to_mqtt.py" and "mqtt_to_db.py".
 
-TODO: visualisation the data from the database via Grafana and setting an alarm system
+Notice that this toolkit can only be executed with the CERN network
