@@ -22,6 +22,7 @@ import snap7
 """
 Setting basic information
 """
+
 config = configparser.ConfigParser()
 config.read('config.ini', encoding='utf-8')
 
@@ -224,7 +225,7 @@ def main():
         while True:
             schedule.run_pending()
             time.sleep(10)
-            print(f"Queue size: {msg_queue.qsize()}")
+            # print(f"Queue size: {msg_queue.qsize()}")
     except KeyboardInterrupt:
         print("Exiting")        
     except Exception as e:  
