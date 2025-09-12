@@ -1,0 +1,239 @@
+# import common modules
+import json
+import threading
+import queue
+import time
+import getpass
+import schedule
+import pytz
+from datetime import datetime
+
+# import mqtt modules
+import paho.mqtt.client as mqtt
+
+# import database modules
+import psycopg2
+import psycopg2.pool
+
+#import siemens plc modules
+import snap7
+
+"""
+Setting basic information
+"""
+
+# Database info
+DB_HOST = "172.19.16.1"
+DB_PORT = "5432"
+DB_USER = "TIDC_B205"
+DB_NAME = "PLC_COLLECT"
+DB_PASSWORD = getpass.getpass("Enter the password for the database: ")
+
+# MQTT connection info
+MQTT_BROKER = "172.19.16.1"
+MQTT_PORT = 1883
+MQTT_TOPIC = "plc/s7-1200/temperature"
+
+# PLC info
+PLC_IP = "192.168.0.1"
+PLC_RACK = 0
+PLC_SLOT = 1
+DB_NUMBER = 15
+
+# Sensor id information
+sensor_id_list = [
+    "RTD01",
+    "RTD02",
+]
+
+# workers initialize
+num_workers = 8
+workers = []
+
+# Set up a queue for the database connection
+msg_queue = queue.Queue()
+
+# Global PLC client and prcessing lock
+plc_client = None
+plc_lock = threading.Lock()
+
+# Set up threaded operation
+def run_threaded(job_func):
+    job_thread = threading.Thread(target=job_func)
+    job_thread.start()
+
+"""
+set up PLC connection
+"""
+def init_plc():
+    global plc_client
+    client = snap7.client.Client()
+    client.connect(PLC_IP, PLC_RACK, PLC_SLOT)
+    plc_client = client
+    print("PLC connection established")
+
+def on_connect(client, userdata, flags, rc, properties):
+    # print(f"Connected with result code {rc}")
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Connected with result code {rc}")
+    client.subscribe(MQTT_TOPIC, qos=1)
+
+def on_message(client, userdata, msg):
+    try:
+        msg_queue.put(msg.payload.decode("utf-8"))
+        print(f"Received message: {msg.payload}")
+    except Exception as e:
+        print(f"Error occured: {e}")
+
+def on_disconnect(client, userdata, flags, rc, properties):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Disconnected with result code {rc}")
+
+def on_log(client, userdata, level, buf):
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - MQTT Log: {buf}")
+
+"""
+set up mqtt server connection
+"""
+# Publish the data to the MQTT broker
+def publish_mqtt_batch(data):
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    try:
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        # payload = json.dumps({"sensor_id": sensor_id, "temperature": temperature})
+        payload = json.dumps(data)
+        client.publish(MQTT_TOPIC, payload, qos=1)
+        print(f"Published playload to MQTT: {payload}")
+    except Exception as e:
+        print(f"Cannot publish data to MQTT: {e}")
+    finally:
+        client.disconnect()
+        
+"""
+setting database
+"""
+def db_pool_setting():
+    # Set up PostgresSQL connection pool
+    global db_pool
+    try:
+        db_pool = psycopg2.pool.SimpleConnectionPool(
+            1, 20, # Min and max connections
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME
+        )
+        if db_pool:
+            print("PostgresSQL connection pool created")
+    except Exception as e:
+        print(f"Cannot create PostgresSQL connection pool: {e}")
+
+    return db_pool
+
+"""
+Database write worker thread, retrieves messages from the queue and writes to PostgreSQL.
+"""
+def db_worker(worker_id):
+    taipei_tz = pytz.timezone('Asia/Taipei')
+    while True:
+        msg_playload = msg_queue.get()
+        if msg_playload is None:
+            print(f"Worker {worker_id} stopping")
+            msg_queue.task_done()
+            break # Stop the thread
+        try:
+            # get a connection from the pool
+            conn = db_pool.getconn()
+            cursor = conn.cursor()
+            data = json.loads(msg_playload)
+
+            time_str = data['timestamp']
+            local_time = datetime.fromisoformat(time_str) # fromisoformat() 函式，它能自動解析 ISO 8601 時間格式
+            utc_time = local_time.astimezone(pytz.utc)
+
+            insert_sql = "INSERT INTO measurements (sensor_id, value, timestamp) VALUES (%s, %s, %s)"            
+            for sensor_id in sensor_id_list:
+                cursor.execute(insert_sql, (sensor_id, data[sensor_id], utc_time))
+            conn.commit()   
+            cursor.close()
+            db_pool.putconn(conn)
+            # print(f"Woker {worker_id} inserted data to the database: {data}")
+        except Exception as e:
+            print(f"woker {worker_id} error: {e}")
+        finally:
+            msg_queue.task_done()
+
+def workers_setting():
+    for i in range(num_workers):
+        t = threading.Thread(target=db_worker, args=(i+1,), daemon=True)
+        t.start()
+        workers.append(t)
+
+"""
+PLC works functions
+"""
+    
+# Get the data from the PLC
+def read_temperature(offset):
+    with plc_lock:
+        data = plc_client.db_read(DB_NUMBER, offset, 4)
+    return snap7.util.get_real(data, 0)
+
+def schedule_job():
+    try:
+        rtd01 = read_temperature(6)
+        rtd02 = read_temperature(44)
+        # Combine the data into a single payload
+        data = {
+            "RTD01": rtd01,
+            "RTD02": rtd02,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        publish_mqtt_batch(data)
+    except Exception as e:
+        print(f"Error reading PLC data: {e}")
+
+def main():
+
+    # set up db pools and workers
+    db_pool_setting()
+    workers_setting()
+    
+
+    # Schedule the job with 20 seconds interval
+    schedule.every().minute.at(":00").do(run_threaded, schedule_job)
+    schedule.every().minute.at(":30").do(run_threaded, schedule_job)
+
+    # Set up the MQTT client
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.on_disconnect = on_disconnect
+    client.on_log = on_log
+
+    # Connect to the MQTT broker
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.loop_start()
+    
+    # Establish connection to the PLC
+    init_plc()
+
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(10)
+            # print(f"Queue size: {msg_queue.qsize()}")
+    except KeyboardInterrupt:
+        print("Exiting")        
+    except Exception as e:  
+        print(f"Error occured: {e}")
+
+    finally:
+        client.loop_stop()
+        for _ in range(num_workers):
+            msg_queue.put(None)
+        for worker in workers:
+            worker.join() # Wait for the worker threads to finish
+        # msg_queue.put(None) # Stop the worker thread
+
+if __name__ == "__main__":
+    main()
