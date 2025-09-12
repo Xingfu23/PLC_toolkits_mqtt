@@ -6,16 +6,18 @@ import threading
 import queue
 import time
 import getpass
+import pytz
+from datetime import datetime
 
 # Database info
-DB_HOST = "194.12.158.118"
+DB_HOST = "172.19.16.1"
 DB_PORT = "5432"
-DB_USER = "postgres"
-DB_NAME = "plc_data"
+DB_USER = "TIDC_B205"
+DB_NAME = "PLC_COLLECT"
 DB_PASSWORD = getpass.getpass("Enter the password for the database: ")
 
 # MQTT connection info
-MQTT_BROKER = "194.12.158.118"
+MQTT_BROKER = "172.19.16.1"
 MQTT_PORT = 1883
 MQTT_TOPIC = "plc/s7-1200/temperature"
 
@@ -47,6 +49,7 @@ def db_worker(worker_id):
     """
     Database write worker thread, retrieves messages from the queue and writes to PostgreSQL.
     """
+    taipei_tz = pytz.timezone('Asia/Taipei')
     while True:
         msg_playload = msg_queue.get()
         if msg_playload is None:
@@ -58,20 +61,24 @@ def db_worker(worker_id):
             conn = db_pool.getconn()
             cursor = conn.cursor()
             data = json.loads(msg_playload)
-            insert_sql = "INSERT INTO temperature_data (sensor_id, temperature) VALUES (%s, %s)"
+
+            time_str = data['timestamp']
+            local_time = datetime.fromisoformat(time_str) # fromisoformat() 函式，它能自動解析 ISO 8601 時間格式
+            utc_time = local_time.astimezone(pytz.utc)
+
+            insert_sql = "INSERT INTO measurements (sensor_id, value, timestamp) VALUES (%s, %s, %s)"
             # cursor.execute(insert_sql, (data["sensor_id"], data["temperature"]))
             for sensor_id in sensor_id_list:
-                cursor.execute(insert_sql, (sensor_id, data[sensor_id]))
+                cursor.execute(insert_sql, (sensor_id, data[sensor_id], utc_time))
             conn.commit()   
             cursor.close()
             db_pool.putconn(conn)
-            # print(f"Woker {worker_id} inserted data to the database: {data}")
         except Exception as e:
             print(f"woker {worker_id} error: {e}")
         finally:
             msg_queue.task_done()
 
-num_workers = 8
+num_workers = 4
 workers = []
 for i in range(num_workers):
     t = threading.Thread(target=db_worker, args=(i+1,), daemon=True)
@@ -79,7 +86,6 @@ for i in range(num_workers):
     workers.append(t)
 
 def on_connect(client, userdata, flags, rc, properties):
-    # print(f"Connected with result code {rc}")
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Connected with result code {rc}")
     client.subscribe(MQTT_TOPIC, qos=1)
 

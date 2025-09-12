@@ -3,7 +3,7 @@ import json
 import time
 import random
 
-MQTT_BROKER = "194.12.158.118"
+MQTT_BROKER = "172.19.16.1"
 MQTT_PORT = 1883
 MQTT_TOPIC = "plc/s7-1200/temperature"
 
