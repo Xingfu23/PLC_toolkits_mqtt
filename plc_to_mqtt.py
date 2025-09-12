@@ -4,6 +4,8 @@ import json
 import time
 import schedule
 import threading
+import pytz 
+from datetime import datetime 
 
 # Set up threaded operation
 def run_threaded(job_func):
@@ -18,7 +20,7 @@ DB_NUMBER = 15
 
 # MQTT info
 # MQTT_BROKER = "localhost"
-MQTT_BROKER = "194.12.158.118"
+MQTT_BROKER = "172.19.16.1"
 MQTT_PORT = 1883
 MQTT_TOPIC = "plc/s7-1200/temperature"
 
@@ -57,11 +59,18 @@ def schedule_job():
     try:
         rtd01 = read_temperature(6)
         rtd02 = read_temperature(44)
+
+        
+        taipei_tz = pytz.timezone('Asia/Taipei')
+        current_time = datetime.now(taipei_tz)   # Get current time in local time zone
+        timestamp_str = current_time.isoformat() # Format the time into a string, including the timezone offset
+
         # Combine the data into a single payload
         data = {
             "RTD01": rtd01,
             "RTD02": rtd02,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            # "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": timestamp_str
         }
         publish_mqtt_batch(data)
     except Exception as e:
@@ -70,8 +79,8 @@ def schedule_job():
 if __name__ == "__main__":
     # Establish connection to the PLC
     init_plc()
-
-    # Schedule the job with 20 seconds interval
+    print("plc running")
+    # Schedule the job with 30 seconds interval
     schedule.every().minute.at(":00").do(run_threaded, schedule_job)
     schedule.every().minute.at(":30").do(run_threaded, schedule_job)
     # schedule.every().minute.at(":40").do(run_threaded, schedule_job)
