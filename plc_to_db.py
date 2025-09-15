@@ -6,6 +6,7 @@ import time
 import getpass
 import schedule
 import pytz
+import configparser
 from datetime import datetime
 
 # import mqtt modules
@@ -21,21 +22,23 @@ import snap7
 """
 Setting basic information
 """
+config = configparser.ConfigParser()
+config.read('config.ini', encoding='utf-8')
 
 # Database info
-DB_HOST = "172.19.16.1"
-DB_PORT = "5432"
-DB_USER = "TIDC_B205"
-DB_NAME = "PLC_COLLECT"
-DB_PASSWORD = getpass.getpass("Enter the password for the database: ")
+DB_HOST = config.get('Database info', 'DB_HOST')
+DB_PORT = config.get('Database info', 'DB_PORT')
+DB_USER = config.get('Database info', 'DB_USER')
+DB_NAME = config.get('Database info', 'DB_NAME')
+DB_PASSWORD = config.get('Database info', 'DB_PASSWORD')
 
-# MQTT connection info
-MQTT_BROKER = "172.19.16.1"
-MQTT_PORT = 1883
-MQTT_TOPIC = "plc/s7-1200/temperature"
+# MQTT info
+MQTT_BROKER = config.get('MQTT info', 'MQTT_BROKER')
+MQTT_PORT = int(config.get('MQTT info', 'MQTT_PORT'))
+MQTT_TOPIC = config.get('MQTT info', 'MQTT_TOPIC')
 
 # PLC info
-PLC_IP = "192.168.0.1"
+PLC_IP = config.get('PLC info', 'PLC_IP')
 PLC_RACK = 0
 PLC_SLOT = 1
 DB_NUMBER = 15
@@ -221,7 +224,7 @@ def main():
         while True:
             schedule.run_pending()
             time.sleep(10)
-            # print(f"Queue size: {msg_queue.qsize()}")
+            print(f"Queue size: {msg_queue.qsize()}")
     except KeyboardInterrupt:
         print("Exiting")        
     except Exception as e:  
