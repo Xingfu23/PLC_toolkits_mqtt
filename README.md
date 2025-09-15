@@ -1,9 +1,21 @@
-# PLC_toolkits_mqtt
- 
-It is a toolkit for the PLC control system.
-For now, the data flow structure is:
-1. The data from the sensors is published to the MQTT server (using Eclipse Mosquitto). The script "plc_to_mqtt.py" is responsible for this task.
-2. The PostgreSQL database subscribes to an MQTT server and records the data in the database. Please check the script "mqtt_to_db.py."
-To execute the programme, please **simultaneously** execute the scripts: "plc_to_mqtt.py" and "mqtt_to_db.py".
+# PLC Control System Toolkit
 
-Notice that this toolkit can only be executed with the CERN network
+This toolkit is designed for the PLC control system.
+
+## Data Flow
+
+- Sensor data is published to the MQTT server (Eclipse Mosquitto).  
+- The PostgreSQL database subscribes to the MQTT server and records the incoming data.
+
+## Usage
+
+To run the program, execute the script:
+
+```bash
+python plc_to_db.py
+```
+
+## TODO
+
+- Upload the Docker Compose file  
+- Make the Grafana panel accessible on the NTU network
